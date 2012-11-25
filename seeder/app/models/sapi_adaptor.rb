@@ -3,25 +3,25 @@ require 'rest_client'
  
 class SapiAdaptor
   @@uri = 'http://api.sensis.com.au/ob-20110511/test'
-  @@params = { :key => '72vpnyj7ahwab3ub2pf7gtp2' }
+  @@params = { :key => '72vpnyj7ahwab3ub2pf7gtp2', :rows => 50 }
  
-  # api.sensis.com.au/ob-20110511/test/search?key=<key> 
+
   def self.search(options={})
     pages = (options[:pages] || 1).to_i
-    query = options[:query].downcase
-    options[:rows] = 50
-    total_pages = 1
+    query = (options[:query] || '').downcase
 
     entries = []
+    total_pages = 1
     (1..pages).each do |n|
-      options[:page] = n
+  	  if n <= total_pages
+        options[:page] = n
+        
+  	    response = RestClient.get("#{@@uri}/search", { :params => options.except(:pages).merge(@@params) })
+  	    json = JSON.parse(response)
+  	    entries += process(query, json)
 
-	  if n <= total_pages
-	    response = RestClient.get("#{@@uri}/search", { :params => options.except(:pages).merge(@@params) })
-	    json = JSON.parse(response)
-	    entries += process(query, json)
-	    total_pages = (json['totalPages'] || 1).to_i
-	  end
+  	    total_pages = (json['totalPages'] || 1).to_i
+  	  end
     end
     entries
   end
@@ -34,17 +34,20 @@ class SapiAdaptor
 
       entry[:search] = query
       entry[:name] = name(result)
-      entry[:categories] = categories(result)
-      entry[:keywords] =  keywords(result)
-      entry[:address] = address(result)
-      entry[:latitude] = latitude(result)
-      entry[:longitude] = longitude(result)
-      entry[:description] = description(result)
-      entry[:phone] = phone(result)
-      entry[:url] = url(result)
+      assign_no_nil(entry, :categories, categories(result))
+      assign_no_nil(entry, :keywords, keywords(result))
+      assign_no_nil(entry, :address, address(result))
+      assign_no_nil(entry, :location, location(result))
+      assign_no_nil(entry, :description, description(result))
+      assign_no_nil(entry, :phone, phone(result))
+      assign_no_nil(entry, :url, url(result))
 
       acc << entry
     end
+  end
+
+  def self.assign_no_nil(entry, key, value) 
+    entry[key] = value if value
   end
 
   def self.name(result)
@@ -72,6 +75,12 @@ class SapiAdaptor
   	ary.compact.join(', ')
   end
 
+  def self.location(result)
+    lat = latitude(result)
+    lon = longitude(result)
+    "#{lat},#{lon}" if lat and lon
+  end
+
   def self.latitude(result)
   	(result['primaryAddress'] || {})['latitude']
   end
@@ -93,7 +102,6 @@ class SapiAdaptor
   def self.url(result)
   	result['primaryContacts'].each { |e| return e['value'] if e['type'] =~ /url/i }
   	result['detailsLink']
-  	nil
   end
 
   def self.clean(ary)
